@@ -95,6 +95,11 @@ A banner should land on your phone.
 - **Blocked-on-you** events (approval / input) use `level=timeSensitive` (breaks through Focus)
   and `call=1` (rings ~30s) so you don't miss them.
 
+> **Note — Codex approvals are terminal-only.** Codex fires its `notify` hook on turn
+> completion but **not** when it asks for permission, so Codex approval prompts show in your
+> terminal / desktop banner but don't reach your phone (Claude Code sends both). Tracked
+> upstream: [openai/codex#11808](https://github.com/openai/codex/issues/11808).
+
 ## Requirements
 `curl`, `jq`, `openssl`. macOS or Linux (Windows via WSL). Install `jq` with
 `brew install jq` or `sudo apt-get install -y jq`.
