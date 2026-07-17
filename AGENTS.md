@@ -5,17 +5,21 @@ notifications when an AI coding agent finishes a turn or needs input**. Do this 
 user's **local machine**. Follow these steps precisely; ask before any change you're unsure of.
 
 ## 0. Preconditions
-- Confirm `curl`, `jq`, and `openssl` are installed. If `jq` is missing, install it
-  (macOS: `brew install jq`; Debian/Ubuntu: `sudo apt-get install -y jq`).
-- The user needs the **Bark** iOS app: https://apps.apple.com/app/id1403753865
-- Works on macOS and Linux. If the user is on Windows, they need WSL.
+- Confirm `curl` and `jq` are installed (and `openssl`, needed only for Bark encryption). If
+  `jq` is missing, install it (macOS: `brew install jq`; Debian/Ubuntu: `sudo apt-get install -y jq`).
+- Ask which phone(s) the user has: **iPhone/Mac**, **Android**, or **both**.
+  - iPhone/Mac → the **Bark** app: https://apps.apple.com/app/id1403753865
+  - Android → the **ntfy** app (Play Store / F-Droid).
+- The machine running the agent must be macOS or Linux (Windows → WSL).
 
-## 1. Collect two values from the user
-1. **Bark URL** — have them open Bark and copy the device URL at the top
-   (`https://api.day.app/XXXXXXXX`).
-2. **Encryption key (recommended)** — have them open Bark → **Settings → Encryption**,
-   choose **AES256 / CBC**, set a **32-character key**, and give you that key. If they
-   decline encryption, skip it (content will transit Bark's server in plaintext).
+## 1. Collect the backend URL(s) from the user
+- **iPhone/Mac (Bark):** have them copy the device URL (`https://api.day.app/XXXX`) → `BARK_URL`.
+  Encryption (recommended): Bark → **Settings → Encryption**, **AES256 / CBC**, a **32-character
+  key** → `BARK_KEY`. If declined, skip (content transits Bark's server in plaintext).
+- **Android (ntfy):** have them subscribe to an **unguessable** topic; the URL is
+  `https://ntfy.sh/<topic>` → `NTFY_URL`. ntfy has no E2E, so the topic must stay secret (or self-host).
+- Set whichever apply in `config.env`. At least one of `BARK_URL` / `NTFY_URL` is required; set
+  both to notify iPhone + Android together.
 
 ## 2. Install the script + config
 ```sh
