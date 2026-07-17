@@ -34,11 +34,11 @@ type="$(field '.type // .hook_event_name // empty')"
 case "$type" in
   agent-turn-complete)
     agent="Codex"; icon="$ICON_CODEX"; emoji="✅"; sub="turn complete"; level="active"; call=0
-    project="$(basename "$PWD" 2>/dev/null || true)"
+    project="$(field '.cwd')"; project="${project##*/}"; [ -n "$project" ] || project="$(basename "$PWD" 2>/dev/null || true)"
     body="$(field '."last-assistant-message" // "Turn complete."')" ;;
   *approval*)
     agent="Codex"; icon="$ICON_CODEX"; emoji="⏳"; sub="needs approval"; level="timeSensitive"; call=1
-    project="$(basename "$PWD" 2>/dev/null || true)"
+    project="$(field '.cwd')"; project="${project##*/}"; [ -n "$project" ] || project="$(basename "$PWD" 2>/dev/null || true)"
     body="$(field '."last-assistant-message" // "Waiting for your approval."')" ;;
   Stop)
     agent="Claude"; icon="$ICON_CLAUDE"; emoji="✅"; sub="done"; level="active"; call=0
