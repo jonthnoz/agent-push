@@ -26,13 +26,28 @@ ICON_CLAUDE="${ICON_CLAUDE:-https://www.google.com/s2/favicons?sz=128&domain=cla
 if [ "$#" -gt 0 ]; then payload="${!#}"; else payload="$(cat)"; fi
 field() { printf '%s' "$payload" | jq -r "$1" 2>/dev/null || true; }
 
-# last assistant text block from a Claude Code transcript (JSONL)
+# Last assistant text from a Claude Code transcript (JSONL).
+# The Stop hook can fire before the final message is flushed, which used to surface
+# the PREVIOUS turn's text. So: scope to text since the last genuine user prompt (never
+# a prior turn), and wait until it stops changing (the write has settled).
 last_assistant_msg() {
   local tp; tp="$(field '.transcript_path')"
   [ -n "$tp" ] && [ -f "$tp" ] || return 0
-  tail -n 200 "$tp" | jq -sr '
-    [ .[] | select(.type=="assistant") | .message.content[]?
-          | select(.type=="text") | .text ] | last // empty' 2>/dev/null || true
+  local msg="" prev="" i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    msg="$(tail -n 400 "$tp" | jq -sr '
+      reduce .[] as $e ([];
+        if $e.type=="user" and (
+             ($e.message.content|type)=="string"
+             or (($e.message.content|type)=="array" and ([$e.message.content[].type]|index("tool_result")|not)))
+        then []
+        elif $e.type=="assistant" then . + [ $e.message.content[]? | select(.type=="text") | .text ]
+        else . end)
+      | last // empty' 2>/dev/null || true)"
+    [ -n "$msg" ] && [ "$msg" = "$prev" ] && break
+    prev="$msg"; sleep 0.15
+  done
+  printf '%s' "$msg"
 }
 
 type="$(field '.type // .hook_event_name // empty')"
