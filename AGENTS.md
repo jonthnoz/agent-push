@@ -64,10 +64,11 @@ Ask the user whether a banner arrived on their phone.
 - Nothing at all, even raw → the Bark app isn't receiving APNS: check Notification permission for
   Bark, disable any VPN/DNS blocker or iCloud Private Relay, reinstall Bark.
 
-## Optional — name the tool in permission notifications
+## Optional — richer permission notifications
 Claude's Notification hook has no tool context, so permission prompts show a generic message.
-To include the pending tool (e.g. `Bash: terraform apply`), also add `pending-tool.sh` (chmod +x it)
-as a PreToolUse hook, MERGED into any existing PreToolUse hooks:
+To include the pending tool (e.g. `Bash: terraform apply`), a `goal:` line from the tool's
+`description` (Bash/Task only), and the question text for AskUserQuestion, add `pending-tool.sh`
+(chmod +x it) as a PreToolUse hook, MERGED into any existing PreToolUse hooks:
 ```json
 "PreToolUse": [ { "hooks": [ { "type": "command", "command": "/ABS/PATH/pending-tool.sh" } ] } ]
 ```

@@ -106,12 +106,18 @@ A banner should land on your phone.
 > terminal / desktop banner but don't reach your phone (Claude Code sends both). Tracked
 > upstream: [openai/codex#11808](https://github.com/openai/codex/issues/11808).
 
-## Optional: name the tool in Claude permission prompts
+## Optional: richer Claude permission prompts
 
 Claude Code's `Notification` hook carries **no tool context** (verified — only a generic
-`"Claude needs your permission"` and a `notification_type`). To show the *actual* pending call
-(e.g. `Bash: terraform apply`), add the included `pending-tool.sh` as a **`PreToolUse`** hook — it
-stashes each tool before it runs so the notification can name it. In `~/.claude/settings.json`:
+`"Claude needs your permission"` message and a `notification_type`). Add the included
+`pending-tool.sh` as a **`PreToolUse`** hook and the permission notification will name the
+**actual pending call** instead of the generic text:
+
+- the tool + its key arg — `Bash: terraform apply` · `Edit: src/main.rs` · `notion-search: meeting notes` (MCP names cleaned)
+- a **`goal:` line** from the tool's `description`, when it has one (Bash & Task only) — e.g. `goal: Run the tests`
+- for **AskUserQuestion**, the question text, labeled *needs input* rather than *needs approval*
+
+Wire it in `~/.claude/settings.json` (merge into any existing `PreToolUse`):
 
 ```json
 "PreToolUse": [
@@ -119,8 +125,8 @@ stashes each tool before it runs so the notification can name it. In `~/.claude/
 ]
 ```
 
-Run `chmod +x pending-tool.sh` first. It's entirely local (writes a temp file under
-`~/.config/agent-notify/`), opt-in, and `notify.sh` falls back to the generic message if it's absent.
+Run `chmod +x pending-tool.sh` first. Entirely local (writes a temp file under
+`~/.config/agent-notify/`), opt-in, and `notify.sh` falls back to the generic message without it.
 
 ## Requirements
 `curl`, `jq`, `openssl`. macOS or Linux (Windows via WSL). Install `jq` with

@@ -74,6 +74,8 @@ case "$type" in
       # optional PreToolUse hook (pending-tool.sh) stashes the pending tool so we can name it
       pend="$HOME/.config/agent-notify/pending-$(field '.session_id').txt"
       if [ -f "$pend" ]; then ptool="$(cat "$pend" 2>/dev/null || true)"; [ -n "$ptool" ] && body="$ptool"; fi
+      # AskUserQuestion fires permission_prompt but is a question, not a command approval
+      case "$body" in AskUserQuestion:*) sub="needs input" ;; esac
     fi ;;
   *)
     agent="Agent"; icon="$ICON_CODEX"; emoji="🔔"; tag="bell"; sub=""; level="active"; call=0
