@@ -26,52 +26,21 @@ ICON_CLAUDE="${ICON_CLAUDE:-https://www.google.com/s2/favicons?sz=128&domain=cla
 if [ "$#" -gt 0 ]; then payload="${!#}"; else payload="$(cat)"; fi
 field() { printf '%s' "$payload" | jq -r "$1" 2>/dev/null || true; }
 
-# Last assistant text from a Claude Code transcript (JSONL).
-# The Stop hook can fire before the final message is flushed, which used to surface
-# the PREVIOUS turn's text. So: scope to text since the last genuine user prompt (never
-# a prior turn), and wait until it stops changing (the write has settled).
-last_assistant_msg() {
+# Fallback only: the docs say Stop provides `last_assistant_message` directly. This reads
+# the transcript for older Claude Code that lacks it — scoped to text since the last genuine
+# user prompt so it can never surface a prior turn (worst case: empty -> "Finished.").
+transcript_last_msg() {
   local tp; tp="$(field '.transcript_path')"
   [ -n "$tp" ] && [ -f "$tp" ] || return 0
-  local msg="" prev="" i
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    msg="$(tail -n 400 "$tp" | jq -sr '
-      reduce .[] as $e ([];
-        if $e.type=="user" and (
-             ($e.message.content|type)=="string"
-             or (($e.message.content|type)=="array" and ([$e.message.content[].type]|index("tool_result")|not)))
-        then []
-        elif $e.type=="assistant" then . + [ $e.message.content[]? | select(.type=="text") | .text ]
-        else . end)
-      | last // empty' 2>/dev/null || true)"
-    [ -n "$msg" ] && [ "$msg" = "$prev" ] && break
-    prev="$msg"; sleep 0.15
-  done
-  printf '%s' "$msg"
-}
-
-# The pending tool call (name + key arg) for permission prompts. "Pending" = a tool_use
-# with no matching tool_result yet, so we never surface an already-finished tool. Retries
-# briefly in case the tool_use hasn't been flushed to the transcript at hook time.
-pending_tool_use() {
-  local tp; tp="$(field '.transcript_path')"
-  [ -n "$tp" ] && [ -f "$tp" ] || return 0
-  local out="" prev="" i
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    out="$(tail -n 400 "$tp" | jq -sr '
-      ( [ .[] | (.message.content // []) | if type=="array" then .[] else empty end
-              | select(.type=="tool_result") | .tool_use_id ] ) as $done
-      | ( [ .[] | select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")
-              | select((.id as $id | $done | index($id)) | not) ] | last ) as $t
-      | if $t == null then empty else
-          ( $t.input.command // $t.input.file_path // $t.input.path // $t.input.url
-            // ($t.input | to_entries | (.[0].value? // "")) ) as $d
-          | if ($d|type)=="string" and ($d|length)>0 then "\($t.name): \($d[0:160])" else $t.name end
-        end' 2>/dev/null || true)"
-    [ -n "$out" ] && [ "$out" = "$prev" ] && break
-    prev="$out"; sleep 0.15
-  done
-  printf '%s' "$out"
+  tail -n 400 "$tp" | jq -sr '
+    reduce .[] as $e ([];
+      if $e.type=="user" and (
+           ($e.message.content|type)=="string"
+           or (($e.message.content|type)=="array" and ([$e.message.content[].type]|index("tool_result")|not)))
+      then []
+      elif $e.type=="assistant" then . + [ $e.message.content[]? | select(.type=="text") | .text ]
+      else . end)
+    | last // empty' 2>/dev/null || true
 }
 
 type="$(field '.type // .hook_event_name // empty')"
@@ -84,17 +53,18 @@ case "$type" in
     agent="Codex"; icon="$ICON_CODEX"; emoji="⏳"; tag="hourglass"; sub="needs approval"; level="timeSensitive"; call=1
     project="$(field '.cwd')"; project="${project##*/}"; [ -n "$project" ] || project="$(basename "$PWD" 2>/dev/null || true)"
     body="$(field '."last-assistant-message" // "Waiting for your approval."')" ;;
-  Stop)
+  Stop)                                       # Claude Code: finished responding
     agent="Claude"; icon="$ICON_CLAUDE"; emoji="✅"; tag="white_check_mark"; sub="done"; level="active"; call=0
     project="$(field '.cwd')"; project="${project##*/}"
-    body="$(last_assistant_msg)"; [ -n "$body" ] || body="Finished." ;;
-  Notification)
+    body="$(field '.last_assistant_message')"        # authoritative field (per docs)
+    [ -n "$body" ] || body="$(transcript_last_msg)"  # fallback for older Claude Code
+    [ -n "$body" ] || body="Finished." ;;
+  Notification)                               # Claude Code: permission or idle prompt
     agent="Claude"; icon="$ICON_CLAUDE"; emoji="⏳"; tag="hourglass"; sub="needs input"; level="timeSensitive"; call=1
     project="$(field '.cwd')"; project="${project##*/}"
+    # The Notification hook carries only a generic message — no tool name/args (per docs).
     body="$(field '.message // "Waiting for your input."')"
-    case "$body" in
-      *permission*) sub="needs approval"; ptool="$(pending_tool_use)"; case "$ptool" in *:*) body="$ptool" ;; esac ;;
-    esac ;;
+    case "$body" in *permission*) sub="needs approval" ;; esac ;;
   *)
     agent="Agent"; icon="$ICON_CODEX"; emoji="🔔"; tag="bell"; sub=""; level="active"; call=0
     project=""
