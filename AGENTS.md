@@ -64,6 +64,15 @@ Ask the user whether a banner arrived on their phone.
 - Nothing at all, even raw → the Bark app isn't receiving APNS: check Notification permission for
   Bark, disable any VPN/DNS blocker or iCloud Private Relay, reinstall Bark.
 
+## Optional — name the tool in permission notifications
+Claude's Notification hook has no tool context, so permission prompts show a generic message.
+To include the pending tool (e.g. `Bash: terraform apply`), also add `pending-tool.sh` (chmod +x it)
+as a PreToolUse hook, MERGED into any existing PreToolUse hooks:
+```json
+"PreToolUse": [ { "hooks": [ { "type": "command", "command": "/ABS/PATH/pending-tool.sh" } ] } ]
+```
+Opt-in and local-only; `notify.sh` falls back to the generic message without it.
+
 ## Scenarios to handle
 - **Only Codex / only Claude / both** — wire only what they use.
 - **Remote SSH servers** — repeat steps 2–3 on each server that runs an agent; it works over SSH

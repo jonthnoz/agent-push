@@ -62,9 +62,19 @@ case "$type" in
   Notification)                               # Claude Code: permission or idle prompt
     agent="Claude"; icon="$ICON_CLAUDE"; emoji="⏳"; tag="hourglass"; sub="needs input"; level="timeSensitive"; call=1
     project="$(field '.cwd')"; project="${project##*/}"
-    # The Notification hook carries only a generic message — no tool name/args (per docs).
+    # .message is generic (no tool context, per docs); route on .notification_type (verified).
     body="$(field '.message // "Waiting for your input."')"
-    case "$body" in *permission*) sub="needs approval" ;; esac ;;
+    ntype="$(field '.notification_type')"; perm=0
+    case "$ntype" in
+      permission_prompt) perm=1 ;;
+      "") case "$body" in *permission*) perm=1 ;; esac ;;   # older Claude Code w/o notification_type
+    esac
+    if [ "$perm" = 1 ]; then
+      sub="needs approval"
+      # optional PreToolUse hook (pending-tool.sh) stashes the pending tool so we can name it
+      pend="$HOME/.config/agent-notify/pending-$(field '.session_id').txt"
+      if [ -f "$pend" ]; then ptool="$(cat "$pend" 2>/dev/null || true)"; [ -n "$ptool" ] && body="$ptool"; fi
+    fi ;;
   *)
     agent="Agent"; icon="$ICON_CODEX"; emoji="🔔"; tag="bell"; sub=""; level="active"; call=0
     project=""

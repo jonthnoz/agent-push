@@ -106,6 +106,22 @@ A banner should land on your phone.
 > terminal / desktop banner but don't reach your phone (Claude Code sends both). Tracked
 > upstream: [openai/codex#11808](https://github.com/openai/codex/issues/11808).
 
+## Optional: name the tool in Claude permission prompts
+
+Claude Code's `Notification` hook carries **no tool context** (verified — only a generic
+`"Claude needs your permission"` and a `notification_type`). To show the *actual* pending call
+(e.g. `Bash: terraform apply`), add the included `pending-tool.sh` as a **`PreToolUse`** hook — it
+stashes each tool before it runs so the notification can name it. In `~/.claude/settings.json`:
+
+```json
+"PreToolUse": [
+  { "hooks": [ { "type": "command", "command": "/abs/path/to/agent-push/pending-tool.sh" } ] }
+]
+```
+
+Run `chmod +x pending-tool.sh` first. It's entirely local (writes a temp file under
+`~/.config/agent-notify/`), opt-in, and `notify.sh` falls back to the generic message if it's absent.
+
 ## Requirements
 `curl`, `jq`, `openssl`. macOS or Linux (Windows via WSL). Install `jq` with
 `brew install jq` or `sudo apt-get install -y jq`.
