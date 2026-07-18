@@ -12,6 +12,7 @@ line="$(printf '%s' "$payload" | jq -r '
   (.tool_name // "tool") as $raw
   | ( if ($raw|startswith("mcp__")) then ($raw|split("__")|last) else $raw end ) as $n
   | ( .tool_input.command // .tool_input.file_path // .tool_input.path // .tool_input.url // .tool_input.query
+      // (if (.tool_input.questions|type)=="array" then ([.tool_input.questions[].question] | join(" / ")) else empty end)
       // ([.tool_input | to_entries[] | select(.key != "description") | .value | select(type=="string")] | .[0] // "") ) as $d
   | ( .tool_input.description // "" ) as $why
   | ( if ($d|type)=="string" and ($d|length)>0 then "\($n): \(($d|gsub("\\s+";" "))[0:160])" else $n end ) as $what
