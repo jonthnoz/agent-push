@@ -43,13 +43,35 @@ transcript_last_msg() {
     | last // empty' 2>/dev/null || true
 }
 
+# Summarize a tool payload (Codex PermissionRequest — same shape as Claude's PreToolUse):
+# "Goal: <description>" on top when present, then "<Tool>: <command/arg>". Mirrors pending-tool.sh.
+tool_summary() {
+  printf '%s' "$payload" | jq -r '
+    (.tool_name // "tool") as $raw
+    | ( if ($raw|startswith("mcp__")) then ($raw|split("__")|last) else $raw end ) as $n
+    | ( .tool_input.command // .tool_input.file_path // .tool_input.path // .tool_input.url // .tool_input.query
+        // ([.tool_input | to_entries[] | select(.key != "description") | .value | select(type=="string")] | .[0] // "") ) as $d
+    | ( .tool_input.description // "" ) as $why
+    | ( if ($d|type)=="string" and ($d|length)>0 then "\($n): \(($d|gsub("\\s+";" "))[0:160])" else $n end ) as $what
+    | if ($why|type)=="string" and ($why|length)>0 then "Goal: \(($why|gsub("\\s+";" "))[0:200])\n\($what)" else $what end' 2>/dev/null || true
+}
+
 type="$(field '.type // .hook_event_name // empty')"
 case "$type" in
   agent-turn-complete)
     agent="Codex"; icon="$ICON_CODEX"; emoji="✅"; tag="white_check_mark"; sub="turn complete"; level="active"; call=0
     project="$(field '.cwd')"; project="${project##*/}"; [ -n "$project" ] || project="$(basename "$PWD" 2>/dev/null || true)"
     body="$(field '."last-assistant-message" // "Turn complete."')" ;;
-  *approval*)
+  PermissionRequest)                          # Codex: about to ask you to approve a tool (hooks system)
+    agent="Codex"; icon="$ICON_CODEX"; emoji="⏳"; tag="hourglass"; sub="needs approval"; level="timeSensitive"; call=1
+    project="$(field '.cwd')"; project="${project##*/}"; [ -n "$project" ] || project="$(basename "$PWD" 2>/dev/null || true)"
+    body="$(tool_summary)"; [ -n "$body" ] || body="Waiting for your approval."
+    # delayed-send baseline: rollout size + moment + trace-db path, to detect after the delay
+    # whether the approval is still pending or was already answered.
+    pr_tp="$(field '.transcript_path')"; pr_size0="$(wc -c < "$pr_tp" 2>/dev/null || echo 0)"
+    pr_sid="$(field '.session_id')"; pr_ts="$(date +%s)"
+    pr_db="$(ls -t "$HOME/.codex"/logs_*.sqlite 2>/dev/null | head -1)"; delay_check=1 ;;
+  *approval*)                                 # Codex legacy notify: never emits approvals (kept as a harmless fallback)
     agent="Codex"; icon="$ICON_CODEX"; emoji="⏳"; tag="hourglass"; sub="needs approval"; level="timeSensitive"; call=1
     project="$(field '.cwd')"; project="${project##*/}"; [ -n "$project" ] || project="$(basename "$PWD" 2>/dev/null || true)"
     body="$(field '."last-assistant-message" // "Waiting for your approval."')" ;;
@@ -126,6 +148,73 @@ send_ntfy() {
   curl -fsS --max-time 10 "$@" "$NTFY_URL" >/dev/null || true
 }
 
-[ -n "${BARK_URL:-}" ] && send_bark
-[ -n "${NTFY_URL:-}" ] && send_ntfy
+send() { [ -n "${BARK_URL:-}" ] && send_bark; [ -n "${NTFY_URL:-}" ] && send_ntfy; return 0; }
+
+# ---- Codex "approval already resolved?" checks, from Codex's trace sqlite ----
+# Codex logs approval activity to ~/.codex/logs_*.sqlite within ~1-2s (unlike the batched
+# rollout, this is orthogonal to how long an approved command then runs). All checks are
+# best-effort: if the db/sqlite3 is absent they return 1 (unknown) and the caller falls back
+# to the rollout-freeze signal — never worse than not having them.
+_sql()    { sqlite3 -readonly -cmd '.timeout 200' "$pr_db" "$1" 2>/dev/null; }
+_db_ok()  { [ -n "${pr_db:-}" ] && command -v sqlite3 >/dev/null 2>&1; }
+_sid_ok() { case "${pr_sid:-}" in *[!0-9a-f-]*|"") return 1 ;; *) return 0 ;; esac; }  # SQL-safe
+
+# Manual: you approved or denied (an ExecApproval submission on our session since the prompt).
+approval_answered() {
+  _db_ok && _sid_ok || return 1
+  local n; n="$(_sql "SELECT count(*) FROM logs WHERE ts >= ${pr_ts:-0}
+    AND target='codex_core::session::handlers'
+    AND feedback_log_body LIKE '%Approval {%' AND feedback_log_body LIKE '%${pr_sid}%';")" || return 1
+  [ "${n:-0}" -gt 0 ]
+}
+# Auto-review: the guardian (a subagent thread whose review prompt names our session id)
+# returned the verdict {"outcome":"allow"}. Escalations/denials are a different (non-allow)
+# verdict → not matched → we still ping (correct: you're now the one being asked).
+auto_allowed() {
+  _db_ok && _sid_ok || return 1
+  local n; n="$(_sql "SELECT count(*) FROM logs v WHERE v.ts >= ${pr_ts:-0}
+    AND v.target='codex_core::stream_events_utils' AND v.feedback_log_body LIKE '%FinalAnswer%'
+    AND v.feedback_log_body LIKE '%\\\"outcome\\\":\\\"allow\\\"%'  -- value 'allow' then } or ,
+    AND v.thread_id IN (SELECT p.thread_id FROM logs p WHERE p.ts >= ${pr_ts:-0} - 2
+      AND p.target='codex_core::session::handlers'
+      AND p.feedback_log_body LIKE '%Reviewed Codex session id: ${pr_sid}%');")" || return 1
+  [ "${n:-0}" -gt 0 ]
+}
+# Is a guardian still reviewing a request from our session (review started, no verdict yet)?
+# Used only to extend the wait past the delay so a slow auto-review resolves before we decide.
+review_in_flight() {
+  _db_ok && _sid_ok || return 1
+  local n; n="$(_sql "SELECT
+     (SELECT count(*) FROM logs WHERE ts >= ${pr_ts:-0} - 2 AND target='codex_core::session::handlers'
+        AND feedback_log_body LIKE '%Reviewed Codex session id: ${pr_sid}%')
+   - (SELECT count(*) FROM logs WHERE ts >= ${pr_ts:-0} AND target='codex_core::stream_events_utils'
+        AND feedback_log_body LIKE '%FinalAnswer%'
+        AND thread_id IN (SELECT thread_id FROM logs WHERE ts >= ${pr_ts:-0} - 2
+          AND target='codex_core::session::handlers'
+          AND feedback_log_body LIKE '%Reviewed Codex session id: ${pr_sid}%'));")" || return 1
+  [ "${n:-0}" -gt 0 ]
+}
+
+# Fire-and-forget in a detached child. Codex PermissionRequest hooks run synchronously AND
+# Codex waits for the hook's stdout to reach EOF — so the child must redirect fd 0/1/2 OFF
+# the inherited pipe (</dev/null >/dev/null 2>&1), else a slow send would block the approval
+# prompt until it finishes. (`async` hook option is parsed but not supported by Codex yet.)
+if [ "${delay_check:-0}" = 1 ] && [ -n "${pr_tp:-}" ]; then
+  # Codex approvals only: poll until NOTIFY_DELAY (default 5s), then push ONLY if you STILL
+  # haven't acted — rollout still frozen, no manual decision, no auto-review allow. If a guardian
+  # is mid-review, keep waiting (capped at NOTIFY_MAX_WAIT) so a slow auto-approve resolves first.
+  ( { deadline=$(( pr_ts + ${NOTIFY_DELAY:-5} )); hard=$(( pr_ts + ${NOTIFY_MAX_WAIT:-30} ))
+      while : ; do
+        cur="$(wc -c < "$pr_tp" 2>/dev/null || echo 0)"
+        if [ "$cur" != "$pr_size0" ] || approval_answered || auto_allowed; then exit 0; fi
+        now="$(date +%s)"
+        if [ "$now" -ge "$deadline" ] && ! { review_in_flight && [ "$now" -lt "$hard" ]; }; then break; fi
+        sleep 1
+      done
+      cur="$(wc -c < "$pr_tp" 2>/dev/null || echo 0)"
+      [ "$cur" = "$pr_size0" ] && send
+    } </dev/null >/dev/null 2>&1 & )
+else
+  ( { send; } </dev/null >/dev/null 2>&1 & )
+fi
 exit 0

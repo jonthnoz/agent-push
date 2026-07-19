@@ -35,9 +35,27 @@ Note the **absolute path** to `notify.sh` (e.g. `~/git/agent-push/notify.sh`) �
 ## 3. Wire the agents the user actually uses (ask which)
 **Codex** — in `~/.codex/config.toml`:
 ```toml
+# "done" notifications (fires only on turn-complete, never on approvals):
 notify = ["/ABS/PATH/notify.sh"]
+
+# approval notifications (Codex >= 0.144): fires only when Codex asks you to approve a
+# tool (shell/apply_patch/MCP/network), not on every tool. matcher ".*" = all approvals.
+[[hooks.PermissionRequest]]
+matcher = ".*"
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "/ABS/PATH/notify.sh"
 ```
 If a `notify` line already exists, DON'T silently replace it — show the user, comment the old one out, confirm.
+Two things to tell the user about the hook: (1) on the next Codex start they'll get a **"Review hooks"**
+prompt — they must pick **Trust all and continue** or it won't run (trust is keyed to the config entry —
+command/matcher — so editing `notify.sh` later does NOT re-prompt; changing the `config.toml` hook does);
+(2) approval pushes are **delayed `NOTIFY_DELAY` seconds (default 5)** and sent only if they still haven't
+acted — detected by the session rollout still being frozen AND no approval decision logged in Codex's trace
+db (`~/.codex/logs_*.sqlite`, best-effort; falls back to the rollout check if absent). So prompts answered
+quickly, auto-approved by `auto_review`, or approved-but-then-running-a-long-silent-command all stay silent;
+only ones left sitting ping. `NOTIFY_DELAY=0` disables the delay.
+The `PermissionRequest` event only exists on Codex >= ~0.144; older Codex gets "done"-only via `notify`.
 
 **Claude Code** — in `~/.claude/settings.json`, add under `"hooks"`:
 ```json

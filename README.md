@@ -61,8 +61,27 @@ NTFY_URL="https://ntfy.sh/your-secret-topic"  # Android (empty if none)
 <details><summary><b>Codex</b> — <code>~/.codex/config.toml</code></summary>
 
 ```toml
+# "done" notifications (fires only on turn-complete):
 notify = ["/Users/you/git/agent-push/notify.sh"]
+
+# approval notifications (Codex >= 0.144) — fires only when Codex asks you to approve
+# a tool (shell/apply_patch/MCP/network), not on every tool. matcher ".*" = all approvals.
+[[hooks.PermissionRequest]]
+matcher = ".*"
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "/Users/you/git/agent-push/notify.sh"
 ```
+
+On the next Codex start you'll get a **"Review hooks"** prompt — pick **Trust all and continue**
+(re-prompts only if you change the hook's `config.toml` entry — command/matcher — not when you edit
+`notify.sh`). The push is **delayed `NOTIFY_DELAY` seconds (default 5)**
+and sent only if you still haven't acted — detected by the session rollout still being frozen **and**
+no approval decision logged in Codex's trace db (`~/.codex/logs_*.sqlite`, checked best-effort; falls
+back to the rollout check if absent). So prompts you approve/deny quickly, ones `auto_review`
+auto-approves, and even ones you approve that then run a long silent command all stay quiet; only
+ones you leave sitting ping. Set `NOTIFY_DELAY=0` to fire immediately. Older Codex without the hooks
+system gets "done"-only via `notify`.
 </details>
 
 <details><summary><b>Claude Code</b> — <code>~/.claude/settings.json</code> (merge into existing <code>hooks</code>)</summary>
@@ -92,7 +111,7 @@ A banner should land on your phone.
 | Event | Notification | Alert |
 |---|---|---|
 | Codex turn complete | `Codex ✅ <project>` + last message | normal |
-| Codex needs approval | `Codex ⏳ <project>` + the action | time-sensitive + rings |
+| Codex needs approval | `Codex ⏳ <project>` + the pending tool + `Goal:` | time-sensitive + rings |
 | Claude Code finishes | `Claude ✅ <project>` + last message | normal |
 | Claude Code needs input | `Claude ⏳ <project>` + the prompt | time-sensitive + rings |
 
@@ -101,10 +120,11 @@ A banner should land on your phone.
 - **Blocked-on-you** events (approval / input) use `level=timeSensitive` (breaks through Focus)
   and `call=1` (rings ~30s) so you don't miss them.
 
-> **Note — Codex approvals are terminal-only.** Codex fires its `notify` hook on turn
-> completion but **not** when it asks for permission, so Codex approval prompts show in your
-> terminal / desktop banner but don't reach your phone (Claude Code sends both). Tracked
-> upstream: [openai/codex#11808](https://github.com/openai/codex/issues/11808).
+> **Note — Codex approvals need the hook.** Codex's legacy `notify` fires only on turn
+> completion, never on approvals ([openai/codex#11808](https://github.com/openai/codex/issues/11808)).
+> Codex ≥ 0.144 adds a hooks system; the `PermissionRequest` hook above delivers approval
+> pushes to your phone. Without it (or on older Codex) you get "done"-only, and approval
+> prompts show only in your terminal / desktop banner.
 
 ## Optional: richer Claude permission prompts
 
